@@ -1,175 +1,155 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Voice Vision AI</title>
+    <title>廣東話 AI 視覺助手</title>
     
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 
     <style>
-        /* High Contrast UI for Low Vision Accessibility */
         body, html {
             margin: 0;
             padding: 0;
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #000; /* Pure black background */
-            color: #FFFF00;        /* Bright yellow text */
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        }
-
-        #app-container {
-            width: 100%;
-            height: 100%;
+            background-color: #000; /* 全黑背景 */
+            color: #FFFF00;        /* 高對比黃色字 */
+            font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif;
             display: flex;
-            flex-direction: column;
             justify-content: center;
             align-items: center;
-            position: relative;
+            text-align: center;
         }
 
-        /* Camera preview - dimmed to keep text readable */
         video {
             position: absolute;
             width: 100%;
             height: 100%;
             object-fit: cover;
-            opacity: 0.5; 
+            opacity: 0.3; /* 降低相機透明度以突出文字 */
             z-index: 1;
         }
 
-        /* Large, centered status text */
-        #status-display {
+        #status {
             position: relative;
             z-index: 2;
-            font-size: 3rem;
-            font-weight: 900;
-            text-align: center;
-            text-transform: uppercase;
-            padding: 20px;
-            pointer-events: none; /* Allows clicks to pass through to the body */
+            font-size: 4rem;
+            font-weight: bold;
+            pointer-events: none;
         }
 
-        .instruction {
+        .hint {
             position: absolute;
-            bottom: 40px;
+            bottom: 10%;
             z-index: 2;
             font-size: 1.5rem;
-            background: rgba(0,0,0,0.7);
-            padding: 10px 20px;
-            border-radius: 10px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border: 2px solid #FFFF00;
         }
     </style>
 </head>
 <body onclick="toggleAssistant()">
 
-    <div id="app-container">
-        <video id="webcam" autoplay muted playsinline></video>
-        
-        <div id="status-display">LOADING AI...</div>
-        
-        <div class="instruction">TAP ANYWHERE TO START</div>
-    </div>
+    <video id="webcam" autoplay muted playsinline></video>
+    <div id="status">點擊螢幕開始</div>
+    <div class="hint">點擊任何地方：開始 / 停止</div>
 
     <script>
         const video = document.getElementById('webcam');
-        const statusDisplay = document.getElementById('status-display');
+        const statusDisplay = document.getElementById('status');
         let model = null;
         let isActive = false;
-        let lastAnnouncedObject = "";
-        let scanTimer = null;
+        let lastObject = "";
+        let scanInterval = null;
 
-        // 1. Initialize AI and Camera
-        async function initApp() {
+        // 簡單的英譯中字典 (常用物件)
+        const dictionary = {
+            "person": "人", "bicycle": "單車", "car": "車", "motorcycle": "電單車",
+            "airplane": "飛機", "bus": "巴士", "train": "火車", "truck": "貨車",
+            "boat": "船", "traffic light": "交通燈", "fire hydrant": "消防栓",
+            "stop sign": "停止標誌", "parking meter": "停車收費錶", "bench": "長凳",
+            "bird": "雀仔", "cat": "貓", "dog": "狗", "horse": "馬", "sheep": "羊",
+            "cow": "牛", "elephant": "象", "bear": "熊", "zebra": "斑馬",
+            "giraffe": "長頸鹿", "backpack": "背囊", "umbrella": "遮",
+            "handbag": "手袋", "tie": "領帶", "suitcase": "行李箱", "frisbee": "飛碟",
+            "skis": "滑雪板", "snowboard": "滑雪板", "sports ball": "波",
+            "kite": "風箏", "baseball bat": "棒球棍", "baseball glove": "棒球手套",
+            "skateboard": "滑板", "surfboard": "衝浪板", "tennis racket": "網球拍",
+            "bottle": "樽", "wine glass": "酒杯", "cup": "杯", "fork": "叉",
+            "knife": "刀", "spoon": "匙羹", "bowl": "碗", "banana": "香蕉",
+            "apple": "蘋果", "sandwich": "三明治", "orange": "橙", "broccoli": "西蘭花",
+            "carrot": "紅蘿蔔", "hot dog": "熱狗", "pizza": "薄餅", "donut": "冬圈",
+            "cake": "蛋糕", "chair": "凳", "couch": "梳化", "potted plant": "盆栽",
+            "bed": "床", "dining table": "餐檯", "toilet": "廁所", "tv": "電視",
+            "laptop": "手提電腦", "mouse": "滑鼠", "remote": "遙控器", "keyboard": "鍵盤",
+            "cell phone": "電話", "microwave": "微波爐", "oven": "焗爐", "toaster": "多士爐",
+            "sink": "洗手盆", "refrigerator": "雪櫃", "book": "書", "clock": "鐘",
+            "vase": "花樽", "scissors": "鉸剪", "teddy bear": "啤啤熊",
+            "hair drier": "風筒", "toothbrush": "牙刷"
+        };
+
+        async function setup() {
             try {
-                // Load the COCO-SSD model
+                statusDisplay.innerText = "載入中...";
                 model = await cocoSsd.load();
-                
-                // Request camera access
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "environment" } 
                 });
                 video.srcObject = stream;
-
-                statusDisplay.innerText = "READY";
-                announceVoice("Vision Assistant Ready. Tap the screen to start scanning.");
-            } catch (error) {
-                console.error(error);
-                statusDisplay.innerText = "ERROR";
-                announceVoice("Camera error. Please ensure you are using HTTPS and have granted permissions.");
+                speak("視覺助手已準備就緒。請點擊螢幕開始。");
+                statusDisplay.innerText = "準備就緒";
+            } catch (err) {
+                speak("相機啟動失敗，請檢查權限。");
+                statusDisplay.innerText = "錯誤";
             }
         }
 
-        // 2. Toggle Start/Stop on Tap
         function toggleAssistant() {
             if (!model) return;
-
             isActive = !isActive;
 
             if (isActive) {
-                statusDisplay.innerText = "SCANNING";
-                statusDisplay.style.color = "#00FF00"; // Green for active
-                announceVoice("Assistant started.");
-                startObjectDetection();
+                statusDisplay.innerText = "偵測中";
+                speak("助手已啟動。");
+                startScanning();
             } else {
-                statusDisplay.innerText = "PAUSED";
-                statusDisplay.style.color = "#FFFF00"; // Yellow for paused
-                announceVoice("Assistant paused.");
-                clearInterval(scanTimer);
+                statusDisplay.innerText = "已暫停";
+                speak("助手已暫停。");
+                clearInterval(scanInterval);
             }
         }
 
-        // 3. The Detection Loop
-        function startObjectDetection() {
-            // Check every 1.5 seconds to avoid overwhelming the user with audio
-            scanTimer = setInterval(async () => {
+        function startScanning() {
+            scanInterval = setInterval(async () => {
                 if (!isActive) return;
-
                 const predictions = await model.detect(video);
-
                 if (predictions.length > 0) {
-                    // We take the top prediction with the highest confidence
-                    const topResult = predictions[0].class;
-
-                    // Only speak if the object is different from the last one seen
-                    if (topResult !== lastAnnouncedObject) {
-                        processDetection(topResult);
-                        lastAnnouncedObject = topResult;
+                    const englishName = predictions[0].class;
+                    const chineseName = dictionary[englishName] || englishName;
+                    
+                    if (chineseName !== lastObject) {
+                        lastObject = chineseName;
+                        if (navigator.vibrate) navigator.vibrate(150);
+                        statusDisplay.innerText = chineseName;
+                        speak("我見到 " + chineseName);
                     }
                 }
             }, 1500);
         }
 
-        // 4. Feedback (Haptic + Visual + Audio)
-        function processDetection(objectName) {
-            // Vibration feedback (1 short pulse)
-            if (navigator.vibrate) {
-                navigator.vibrate(150);
-            }
-
-            // Visual update
-            statusDisplay.innerText = objectName;
-
-            // Voice update
-            announceVoice("I see a " + objectName);
-        }
-
-        // 5. Text-to-Speech Engine
-        function announceVoice(message) {
-            // Cancel any current speech so it doesn't get backlogged
+        function speak(text) {
             window.speechSynthesis.cancel();
-            
-            const speech = new SpeechSynthesisUtterance(message);
-            speech.lang = 'en-US';
-            speech.rate = 1.0; 
-            window.speechSynthesis.speak(speech);
+            const msg = new SpeechSynthesisUtterance(text);
+            msg.lang = 'zh-HK'; // 設定為廣東話
+            msg.rate = 1.0;
+            window.speechSynthesis.speak(msg);
         }
 
-        // Start the loading process
-        initApp();
+        setup();
     </script>
 </body>
 </html>
