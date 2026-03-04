@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Voice Vision AI</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+    <style>
+        /* High Contrast UI for Low Vision Accessibility */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000; /* Pure black background */
+            color: #FFFF00;        /* Bright yellow text */
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        #app-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        /* Camera preview - dimmed to keep text readable */
+        video {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.5; 
+            z-index: 1;
+        }
+
+        /* Large, centered status text */
+        #status-display {
+            position: relative;
+            z-index: 2;
+            font-size: 3rem;
+            font-weight: 900;
+            text-align: center;
+            text-transform: uppercase;
+            padding: 20px;
+            pointer-events: none; /* Allows clicks to pass through to the body */
+        }
+
+        .instruction {
+            position: absolute;
+            bottom: 40px;
+            z-index: 2;
+            font-size: 1.5rem;
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body onclick="toggleAssistant()">
+
+    <div id="app-container">
+        <video id="webcam" autoplay muted playsinline></video>
+        
+        <div id="status-display">LOADING AI...</div>
+        
+        <div class="instruction">TAP ANYWHERE TO START</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const statusDisplay = document.getElementById('status-display');
+        let model = null;
+        let isActive = false;
+        let lastAnnouncedObject = "";
+        let scanTimer = null;
+
+        // 1. Initialize AI and Camera
+        async function initApp() {
+            try {
+                // Load the COCO-SSD model
+                model = await cocoSsd.load();
+                
+                // Request camera access
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "environment" } 
+                });
+                video.srcObject = stream;
+
+                statusDisplay.innerText = "READY";
+                announceVoice("Vision Assistant Ready. Tap the screen to start scanning.");
+            } catch (error) {
+                console.error(error);
+                statusDisplay.innerText = "ERROR";
+                announceVoice("Camera error. Please ensure you are using HTTPS and have granted permissions.");
+            }
+        }
+
+        // 2. Toggle Start/Stop on Tap
+        function toggleAssistant() {
+            if (!model) return;
+
+            isActive = !isActive;
+
+            if (isActive) {
+                statusDisplay.innerText = "SCANNING";
+                statusDisplay.style.color = "#00FF00"; // Green for active
+                announceVoice("Assistant started.");
+                startObjectDetection();
+            } else {
+                statusDisplay.innerText = "PAUSED";
+                statusDisplay.style.color = "#FFFF00"; // Yellow for paused
+                announceVoice("Assistant paused.");
+                clearInterval(scanTimer);
+            }
+        }
+
+        // 3. The Detection Loop
+        function startObjectDetection() {
+            // Check every 1.5 seconds to avoid overwhelming the user with audio
+            scanTimer = setInterval(async () => {
+                if (!isActive) return;
+
+                const predictions = await model.detect(video);
+
+                if (predictions.length > 0) {
+                    // We take the top prediction with the highest confidence
+                    const topResult = predictions[0].class;
+
+                    // Only speak if the object is different from the last one seen
+                    if (topResult !== lastAnnouncedObject) {
+                        processDetection(topResult);
+                        lastAnnouncedObject = topResult;
+                    }
+                }
+            }, 1500);
+        }
+
+        // 4. Feedback (Haptic + Visual + Audio)
+        function processDetection(objectName) {
+            // Vibration feedback (1 short pulse)
+            if (navigator.vibrate) {
+                navigator.vibrate(150);
+            }
+
+            // Visual update
+            statusDisplay.innerText = objectName;
+
+            // Voice update
+            announceVoice("I see a " + objectName);
+        }
+
+        // 5. Text-to-Speech Engine
+        function announceVoice(message) {
+            // Cancel any current speech so it doesn't get backlogged
+            window.speechSynthesis.cancel();
+            
+            const speech = new SpeechSynthesisUtterance(message);
+            speech.lang = 'en-US';
+            speech.rate = 1.0; 
+            window.speechSynthesis.speak(speech);
+        }
+
+        // Start the loading process
+        initApp();
+    </script>
+</body>
+</html>
